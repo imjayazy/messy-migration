@@ -1,72 +1,52 @@
 # CHANGES.md
 
-## Overview
+## Issues Identified in Legacy Code
 
-This document outlines the changes I made to improve the legacy user management API.  
-The goal was to refactor and improve code quality, maintain functionality, and make minimal, pragmatic changes.  
-
----
-
-## Major Issues Identified
-
-- Raw SQL queries with no ORM abstraction, making code less maintainable.
-- No password hashing (plain text password storage — a critical security risk).
-- Missing validation for required fields in some endpoints.
-- Inconsistent error handling.
-- Return values not always proper JSON or correct HTTP status codes.
-- Hard-coded DB connections without separation of concerns.
-
----
+- Passwords were stored and checked in plaintext, which is a major security flaw.
+- SQL injection risk due to use of raw string formatting in SQL queries.
+- Database connection (`sqlite3.connect`) was opened globally with `check_same_thread=False`, which is unsafe and prone to concurrency issues.
+- API returned inconsistent and non-JSON responses (`str()` for some endpoints).
+- Missing HTTP status codes — most responses were `200 OK` even for errors.
+- No validation of incoming JSON data or required fields.
+- Debugging `print()` statements left in production code.
+- Code was harder to maintain and modify due to duplicated logic and poor naming.
 
 ## Changes Made
 
- **Code Organization**
-- Moved all DB operations to use SQLAlchemy ORM for better maintainability and readability.
-- Defined a `User` model with proper schema mapping.
-- Added `to_dict()` method in `User` model for JSON serialization.
+- Passwords are now securely hashed on creation and checked with `check_password_hash` on login.
+- All SQL queries use parameterized queries (`?`) to prevent SQL injection.
+- Removed global database connection and created a helper function to open & close connections per request.
+- All API responses are now proper JSON with clear keys and messages.
+- All endpoints now return appropriate HTTP status codes: `201 Created`, `400 Bad Request`, `404 Not Found`, `401 Unauthorized`, etc.
+- Added validation for required fields in `POST` and `PUT` requests.
+- Removed debugging print statements.
+- Improved code readability: better variable names, consistent style, DRY (Don't Repeat Yourself) principle applied.
 
- **Security Improvements**
-- Added password hashing for user creation and password checks for login using `werkzeug.security`.
-- Ensured email uniqueness by database constraint.
+## Why These Changes Are Important
 
- **Best Practices**
-- Standardized all endpoints to return `jsonify` responses with proper HTTP status codes.
-- Improved error messages and exception handling.
-- Used parameterized queries or ORM (eliminates SQL injection risk).
+- Protects sensitive user data and improves security.
+- Prevents malicious SQL injection attacks.
+- Ensures correctness and safety of database operations.
+- Makes the API consistent, easier for clients to consume, and adheres to REST best practices.
+- Code is easier to read, maintain, and extend in the future.
 
-**Documentation**
-- Documented changes and trade-offs in this file.
-- Requirements updated to include `Flask-SQLAlchemy`.
+## Assumptions & Trade-offs
 
----
-
-## Assumptions / Trade-offs
-
-- Kept the same database file (`users.db`) for simplicity.
-- Did not implement user authentication tokens (out of scope).
-- Kept responses minimal and focused on functionality.
-
----
+- Did not switch to SQLAlchemy ORM for this assignment, despite its advantages:
+  - The assignment discourages over-engineering.
+  - Current scope is small, and sqlite3 suffices.
+  - Retained sqlite3 for simplicity and compatibility with existing `users.db`.
+- Assumed `users.db` already has a `users` table with at least `id`, `name`, `email`, and `password` columns.
 
 ## AI Usage
 
-I used **ChatGPT** to assist with:
-- Drafting this `CHANGES.md` file.
-- Suggesting best practices for SQLAlchemy usage and password hashing.
+I used **ChatGPT** to help draft this `CHANGES.md` and refine the language for clarity and conciseness.  
+All code changes were implemented and tested manually, with AI guidance limited to suggestions and documentation help.
 
-All code was reviewed and manually tested after suggestions.
+## With More Time
 
----
-
-## What I Would Do With More Time
-
-- Add automated unit tests for all endpoints.
-- Implement token-based authentication for login.
-- Use environment variables for sensitive configuration (like DB path).
-- Add pagination and sorting on `/users` endpoint.
-
----
-
-## Updated Requirements
-
-Added the following to `requirements.txt`:
+- Add unit tests for all endpoints.
+- Add input schema validation using `marshmallow` or `pydantic`.
+- Improve error logging.
+- Switch to SQLAlchemy ORM and add migrations.
+- Implement JWT-based authentication & rate limiting for enhanced security.
