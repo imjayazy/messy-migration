@@ -36,12 +36,13 @@
   - The assignment discourages over-engineering.
   - Current scope is small, and sqlite3 suffices.
   - Retained sqlite3 for simplicity and compatibility with existing `users.db`.
-- Assumed `users.db` already has a `users` table with at least `id`, `name`, `email`, and `password` columns.
+
 
 ## AI Usage
 
-I used **ChatGPT** to help draft this `CHANGES.md` and refine the language for clarity and conciseness.  
-All code changes were implemented and tested manually, with AI guidance limited to suggestions and documentation help.
+I used **ChatGPT** to help draft this `CHANGES.md` and refine the language for clarity and conciseness.
+Check the correct way to hash and verify passwords.
+Review my HTTP status code choices.
 
 ## With More Time
 
