@@ -1,114 +1,129 @@
 from flask import Flask, request, jsonify
-from flask_sqlalchemy import SQLAlchemy
-from sqlalchemy.exc import SQLAlchemyError
+import sqlite3
 from werkzeug.security import generate_password_hash, check_password_hash
 
 app = Flask(__name__)
-app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///users.db'
-app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
-db = SQLAlchemy(app)
+DB_PATH = 'users.db'
 
-class User(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    name = db.Column(db.String(80), nullable=False)
-    email = db.Column(db.String(120), unique=True, nullable=False)
-    password_hash = db.Column(db.String(128), nullable=False)
+def get_db_connection():
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    return conn
 
-    def to_dict(self):
-        return {
-            'id': self.id,
-            'name': self.name,
-            'email': self.email
-        }
 
 @app.route('/')
-def health_check():
-    return  'User Management System is running'
+def home():
+    return jsonify({"message": "User Management System"}), 200
+
 
 @app.route('/users', methods=['GET'])
-def get_users():
-    users = User.query.all()
-    return jsonify([user.to_dict() for user in users]), 200
+def get_all_users():
+    conn = get_db_connection()
+    users = conn.execute("SELECT id, name, email FROM users").fetchall()
+    conn.close()
+    return jsonify([dict(user) for user in users]), 200
+
 
 @app.route('/user/<int:user_id>', methods=['GET'])
 def get_user(user_id):
-    user = User.query.get(user_id)
+    conn = get_db_connection()
+    user = conn.execute("SELECT id, name, email FROM users WHERE id = ?", (user_id,)).fetchone()
+    conn.close()
     if user:
-        return jsonify(user.to_dict()), 200
-    return jsonify({'error': 'User not found'}), 404
+        return jsonify(dict(user)), 200
+    else:
+        return jsonify({"error": "User not found"}), 404
+
 
 @app.route('/users', methods=['POST'])
 def create_user():
     data = request.get_json()
     if not data or not all(k in data for k in ('name', 'email', 'password')):
-        return jsonify({'error': 'Missing required fields'}), 400
+        return jsonify({"error": "Missing required fields"}), 400
 
     hashed_pw = generate_password_hash(data['password'])
 
+    conn = get_db_connection()
     try:
-        new_user = User(name=data['name'], email=data['email'], password_hash=hashed_pw)
-        db.session.add(new_user)
-        db.session.commit()
-        return jsonify(new_user.to_dict()), 201
-    except SQLAlchemyError:
-        db.session.rollback()
-        return jsonify({'error': 'Failed to create user'}), 500
+        conn.execute(
+            "INSERT INTO users (name, email, password) VALUES (?, ?, ?)",
+            (data['name'], data['email'], hashed_pw)
+        )
+        conn.commit()
+    except sqlite3.IntegrityError:
+        conn.close()
+        return jsonify({"error": "Email already exists"}), 400
+
+    conn.close()
+    return jsonify({"message": "User created"}), 201
+
 
 @app.route('/user/<int:user_id>', methods=['PUT'])
 def update_user(user_id):
-    user = User.query.get(user_id)
-    if not user:
-        return jsonify({'error': 'User not found'}), 404
-
     data = request.get_json()
-    if 'name' in data:
-        user.name = data['name']
-    if 'email' in data:
-        user.email = data['email']
-    if 'password' in data:
-        user.password_hash = generate_password_hash(data['password'])
+    if not data:
+        return jsonify({"error": "Invalid data"}), 400
 
-    try:
-        db.session.commit()
-        return jsonify(user.to_dict()), 200
-    except SQLAlchemyError:
-        db.session.rollback()
-        return jsonify({'error': 'Failed to update user'}), 500
+    fields = []
+    values = []
+
+    if 'name' in data:
+        fields.append("name = ?")
+        values.append(data['name'])
+    if 'email' in data:
+        fields.append("email = ?")
+        values.append(data['email'])
+
+    if not fields:
+        return jsonify({"error": "No updatable fields provided"}), 400
+
+    values.append(user_id)
+
+    conn = get_db_connection()
+    conn.execute(f"UPDATE users SET {', '.join(fields)} WHERE id = ?", values)
+    conn.commit()
+    conn.close()
+    return jsonify({"message": "User updated"}), 200
+
 
 @app.route('/user/<int:user_id>', methods=['DELETE'])
 def delete_user(user_id):
-    user = User.query.get(user_id)
-    if not user:
-        return jsonify({'error': 'User not found'}), 404
+    conn = get_db_connection()
+    conn.execute("DELETE FROM users WHERE id = ?", (user_id,))
+    conn.commit()
+    conn.close()
+    return jsonify({"message": f"User {user_id} deleted"}), 200
 
-    try:
-        db.session.delete(user)
-        db.session.commit()
-        return jsonify({'message': 'User deleted'}), 200
-    except SQLAlchemyError:
-        db.session.rollback()
-        return jsonify({'error': 'Failed to delete user'}), 500
 
-@app.route('/search')
-def search_user():
+@app.route('/search', methods=['GET'])
+def search_users():
     name = request.args.get('name')
     if not name:
-        return jsonify({'error': 'Name parameter is required'}), 400
-    users = User.query.filter(User.name.ilike(f"%{name}%")).all()
-    return jsonify([user.to_dict() for user in users]), 200
+        return jsonify({"error": "Please provide a name to search"}), 400
+
+    conn = get_db_connection()
+    users = conn.execute("SELECT id, name, email FROM users WHERE name LIKE ?", (f'%{name}%',)).fetchall()
+    conn.close()
+    return jsonify([dict(user) for user in users]), 200
+
 
 @app.route('/login', methods=['POST'])
 def login():
     data = request.get_json()
     if not data or not all(k in data for k in ('email', 'password')):
-        return jsonify({'error': 'Email and password are required'}), 400
+        return jsonify({"error": "Missing credentials"}), 400
 
-    user = User.query.filter_by(email=data['email']).first()
-    if user and check_password_hash(user.password_hash, data['password']):
-        return jsonify({'message': 'Login successful'}), 200
-    return jsonify({'error': 'Invalid credentials'}), 401
+    conn = get_db_connection()
+    user = conn.execute("SELECT id, password FROM users WHERE email = ?", (data['email'],)).fetchone()
+    conn.close()
+
+    if user and check_password_hash(user['password'], data['password']):
+        return jsonify({"status": "success", "user_id": user['id']}), 200
+    else:
+        return jsonify({"status": "failed"}), 401
+
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    app.run(host='0.0.0.0', port=5009, debug=True)
 
