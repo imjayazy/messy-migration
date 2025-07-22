@@ -24,7 +24,7 @@ class User(db.Model):
 
 @app.route('/')
 def health_check():
-    return {'status': 'User Management System is running'}, 200
+    return  'User Management System is running'
 
 @app.route('/users', methods=['GET'])
 def get_users():
